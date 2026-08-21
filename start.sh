@@ -1,2 +1,2 @@
 #!/bin/bash
-json package.json
+node package.json
