@@ -12,7 +12,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 # 2. Global Data Structures
 registered_teams = {}  # {captain_id: {"team_name": X, "players": [id1, id2...]}}
-MAX_TEAMS = 8
+MAX_TEAMS = 2          # Head-to-head automation trigger
 VALORANT_MAPS = ["Abyss", "Ascent", "Bind", "Haven", "Lotus", "Split", "Sunset"]
 active_vetos = {}      # {channel_id: {"team1": id, "team2": id, "banned": [], "turn": id}}
 
@@ -29,32 +29,64 @@ class TeamRegistrationModal(discord.ui.Modal, title="Valorant Team Registration"
         captain = interaction.user
         
         if len(registered_teams) >= MAX_TEAMS:
-            return await interaction.response.send_message("❌ Registration failed: The scrim slots are completely full!", ephemeral=True)
+            return await interaction.response.send_message("❌ Registration failed: The match slots are already full!", ephemeral=True)
 
         if captain.id in registered_teams:
             return await interaction.response.send_message("❌ You have already registered a team!", ephemeral=True)
 
-        # Collect roster text strings from inputs
-        roster_text = f"1. {captain.mention}\n2. {self.player2.value}\n3. {self.player3.value}\n4. {self.player4.value}\n5. {self.player5.value}"
-
-        # Save team mapping data to memory
+        # Save team data to memory
         registered_teams[captain.id] = {
             "team_name": self.team_name.value,
             "players": [captain.name, self.player2.value, self.player3.value, self.player4.value, self.player5.value]
         }
 
-        embed = discord.Embed(title="✅ Team Registered Successfully!", color=discord.Color.green())
-        embed.add_field(name="Team Name", value=self.team_name.value, inline=False)
-        embed.add_field(name="Captain", value=captain.mention, inline=True)
-        embed.add_field(name="Slots Taken", value=f"{len(registered_teams)}/{MAX_TEAMS}", inline=True)
-        embed.add_field(name="Roster", value=roster_text, inline=False)
+        await interaction.response.send_message(f"✅ Your team **{self.team_name.value}** has been recorded!", ephemeral=True)
 
-        await interaction.response.send_message(embed=embed)
+        # 🚀 AUTOMATION TRIGGER CHECK
+        if len(registered_teams) == MAX_TEAMS:
+            closed_embed = discord.Embed(
+                title="🏆 Valorant Scrim Sign-Ups [CLOSED]",
+                description="Slots are full! The automated BO3 map veto is commencing below.",
+                color=discord.Color.dark_grey()
+            )
+            await interaction.message.edit(embed=closed_embed, view=None)
+
+            # Pull both captain IDs out of memory
+            captain_ids = list(registered_teams.keys())
+            c1_id, c2_id = captain_ids[0], captain_ids[1]
+            
+            t1_name = registered_teams[c1_id]["team_name"]
+            t2_name = registered_teams[c2_id]["team_name"]
+
+            # Initialize map ban state
+            active_vetos[interaction.channel_id] = {
+                "team1": c1_id,
+                "team2": c2_id,
+                "banned": [],
+                "turn": c1_id
+            }
+
+            veto_embed = discord.Embed(
+                title="🗺️ Automated BO3 Map Pick & Ban",
+                description=f"⚔️ **{t1_name}** vs **{t2_name}**\n\n**Current Turn:** <@{c1_id}> to ban first.",
+                color=discord.Color.orange()
+            )
+            
+            view = MapBanView(interaction.channel_id, c1_id, c2_id, t1_name, t2_name)
+            await interaction.channel.send(content=f"<@{c1_id}> <@{c2_id}>: Your match is set! Begin banning until 3 maps remain.", embed=veto_embed, view=view)
+            
+        else:
+            updated_embed = discord.Embed(
+                title="🏆 Valorant Scrim Sign-Ups",
+                description=f"Click the button below to register!\n\n**Slots Filled:** 1/{MAX_TEAMS}\n**Waiting for Opponent...**",
+                color=discord.Color.red()
+            )
+            await interaction.message.edit(embed=updated_embed, view=RegisterButtonView())
 
 
 class RegisterButtonView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=None) # Keeps button listening indefinitely even after restarts
+        super().__init__(timeout=None)
 
     @discord.ui.button(label="Register Team", style=discord.ButtonStyle.success, custom_id="persistent_register_button")
     async def register_click(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -64,60 +96,39 @@ class RegisterButtonView(discord.ui.View):
 # 4. Bot Lifecycle Event
 @bot.event
 async def on_ready():
-    # Tell the bot engine to remember the button view layout across restarts
     bot.add_view(RegisterButtonView())
     await bot.tree.sync()
     print(f"Valorant Scrim Bot is online as {bot.user}")
 
 
-# 5. Admin Registration Setup Panels
+# 5. Setup Panel Command
 @bot.tree.command(name="setup_registration", description="Post the persistent registration panel inside a channel.")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def setup_registration(interaction: discord.Interaction):
     embed = discord.Embed(
         title="🏆 Valorant Scrim Sign-Ups",
-        description="Click the button below to register your 5-stack roster for tonight's scrim matches!\n\n**Requirements:**\n* Must be the Team Captain clicking.\n* Have your team roster tags ready.",
+        description=f"Click the button below to register your 5-stack roster for the next match!\n\n**Slots Filled:** 0/{MAX_TEAMS}",
         color=discord.Color.red()
     )
     await interaction.response.send_message(embed=embed, view=RegisterButtonView())
 
 
-# 6. View All Registered Teams
-@bot.tree.command(name="scrim_list", description="Show all teams currently registered for the scrim.")
-async def scrim_list(interaction: discord.Interaction):
-    if not registered_teams:
-        return await interaction.response.send_message("📭 No teams have registered yet! Use the panel button to join.", ephemeral=True)
-    
-    embed = discord.Embed(title="🏆 Current Valorant Scrim Lobby", color=discord.Color.blue())
-    
-    for captain_id, data in registered_teams.items():
-        # Display index 0 player as the captain object link, rest as flat descriptive names
-        roster_text = f"👑 <@{captain_id}>\n" + "\n".join([f"👤 {p}" for p in data["players"][1:]])
-        
-        embed.add_field(
-            name=f"🟢 Team: {data['team_name']}", 
-            value=f"{roster_text}", 
-            inline=False
-        )
-        
-    await interaction.response.send_message(embed=embed)
-
-
-# 7. Clear Lobby (Admin Only)
-@bot.tree.command(name="scrim_clear", description="Clear all registered teams to start a new scrim session.")
+# 6. Clear Match/Lobby (Admin Reset)
+@bot.tree.command(name="scrim_clear", description="Reset registration panel and clear memory.")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def scrim_clear(interaction: discord.Interaction):
     global registered_teams
     registered_teams.clear()
-    await interaction.response.send_message("🧹 The scrim lobby has been cleared. Registration is reset!")
+    
+    embed = discord.Embed(
+        title="🏆 Valorant Scrim Sign-Ups",
+        description=f"The lobby has been reset by an admin!\n\nClick below to register.\n**Slots Filled:** 0/{MAX_TEAMS}",
+        color=discord.Color.red()
+    )
+    await interaction.response.send_message(embed=embed, view=RegisterButtonView())
 
-@scrim_clear.error
-async def clear_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
-    if isinstance(error, app_commands.MissingPermissions):
-        await interaction.response.send_message("❌ You do not have permission to clear the scrim lobby.", ephemeral=True)
 
-
-# 8. Map Ban Interactive Logic
+# 7. Map Ban Interactive UI Components (BO3 Edition)
 class MapBanView(discord.ui.View):
     def __init__(self, channel_id, team1_id, team2_id, team1_name, team2_name):
         super().__init__(timeout=300)
@@ -154,11 +165,13 @@ class MapBanView(discord.ui.View):
             
             remaining_maps = [m for m in VALORANT_MAPS if m not in self.banned_maps]
 
-            if len(remaining_maps) == 1:
-                final_map = remaining_maps[0]
+            # 🚀 END CONDITION CHANGE: Stop when exactly 3 maps are left
+            if len(remaining_maps) == 3:
+                maps_list_string = ", ".join(remaining_maps)
+                
                 embed = discord.Embed(
                     title="🎮 Map Veto Complete!",
-                    description=f"All maps have been vetoed. You will be playing on:\n\n# 🗺️ **{final_map}**",
+                    description=f"The maps to play are:\n# 🗺️ **{maps_list_string}**\n\n## ⚔️ **BEST OF 3**",
                     color=discord.Color.gold()
                 )
                 active_vetos.pop(self.channel_id, None)
@@ -181,33 +194,5 @@ class MapBanView(discord.ui.View):
 
         return callback
 
-
-# 9. Map Ban Command Trigger
-@bot.tree.command(name="mapban", description="Start a map veto between two registered captains.")
-@app_commands.describe(captain1="The first team's captain", captain2="The second team's captain")
-async def mapban(interaction: discord.Interaction, captain1: discord.Member, captain2: discord.Member):
-    if captain1.id not in registered_teams or captain2.id not in registered_teams:
-        return await interaction.response.send_message("❌ Error: Both users must be registered team captains. Use `/scrim_list` to check.", ephemeral=True)
-
-    t1_name = registered_teams[captain1.id]["team_name"]
-    t2_name = registered_teams[captain2.id]["team_name"]
-
-    active_vetos[interaction.channel_id] = {
-        "team1": captain1.id,
-        "team2": captain2.id,
-        "banned": [],
-        "turn": captain1.id
-    }
-
-    embed = discord.Embed(
-        title="🗺️ Valorant Map Pick & Ban",
-        description=f"**{t1_name}** vs **{t2_name}**\n\n**Current Turn:** {captain1.mention} to ban first.",
-        color=discord.Color.orange()
-    )
-    
-    view = MapBanView(interaction.channel_id, captain1.id, captain2.id, t1_name, t2_name)
-    await interaction.response.send_message(embed=embed, view=view)
-
-
-# 10. Start the Runtime Environment Engine
+# 8. Start the Runtime Environment Engine
 bot.run(os.environ.get("DISCORD_TOKEN"))
