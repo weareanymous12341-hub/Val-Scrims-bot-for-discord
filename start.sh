@@ -1,2 +1,2 @@
 #!/bin/bash
-node package.json
+npm start
