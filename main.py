@@ -15,7 +15,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # 2. Global Data Structures
 registered_teams = {}  # {captain_id: {"team_name": X, "players": [id1, id2...]}}
 MAX_TEAMS = 2          # Head-to-head automation trigger
-VALORANT_MAPS = ["Abyss", "Ascent", "Bind", "Haven", "Lotus", "Split", "Sunset"]
+VALORANT_MAPS = ["Abyss", "Ascent", "Sunset", "Haven", "Lotus", "Split", "Summit"]
 active_vetos = {}      # {channel_id: {"team1": id, "team2": id, "banned": [], "turn": id}}
 
 
