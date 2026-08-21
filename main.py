@@ -215,5 +215,6 @@ class MapBanView(discord.ui.View):
                 color=discord.Color.orange()
             )
             embed.add_field(name="Banned Maps", value=", ".join(self.banned_maps) if self.banned_maps else "None", inline=False)
-await interaction.response.edit_message(embed=embed, view=self)return callback
+await interaction.response.edit_message(embed=embed, view=self)
+return callback
 bot.run(os.environ.get("DISCORD_TOKEN"))
