@@ -1,4 +1,6 @@
 import os
+import random
+import asyncio
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -128,7 +130,7 @@ async def scrim_clear(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=RegisterButtonView())
 
 
-# 7. Map Ban Interactive UI Components (BO3 Edition)
+# 7. Map Ban Interactive UI Components (BO3 Roll Edition)
 class MapBanView(discord.ui.View):
     def __init__(self, channel_id, team1_id, team2_id, team1_name, team2_name):
         super().__init__(timeout=300)
@@ -165,19 +167,43 @@ class MapBanView(discord.ui.View):
             
             remaining_maps = [m for m in VALORANT_MAPS if m not in self.banned_maps]
 
-            # 🚀 END CONDITION CHANGE: Stop when exactly 3 maps are left
+            # Stop when exactly 3 maps are left
             if len(remaining_maps) == 3:
-                maps_list_string = ", ".join(remaining_maps)
-                
-                embed = discord.Embed(
-                    title="🎮 Map Veto Complete!",
-                    description=f"The maps to play are:\n# 🗺️ **{maps_list_string}**\n\n## ⚔️ **BEST OF 3**",
+                # Remove active session from tracking dictionary
+                active_vetos.pop(self.channel_id, None)
+
+                # Show an initial animated rolling screen
+                roll_embed = discord.Embed(
+                    title="🎲 Veto Complete! Rolling Starting Map...",
+                    description="Choosing which map will be played first from the pool:\n" + ", ".join([f"`{m}`" for m in remaining_maps]),
+                    color=discord.Color.purple()
+                )
+                await interaction.response.edit_message(embed=roll_embed, view=None)
+
+                # Wait 2.5 seconds to build suspense
+                await asyncio.sleep(2.5)
+
+                # Randomly shuffle the 3 remaining maps
+                random.shuffle(remaining_maps)
+                map_1 = remaining_maps[0]
+                map_2 = remaining_maps[1]
+                map_3 = remaining_maps[2]
+
+                # Post final ordered maps result card
+                final_embed = discord.Embed(
+                    title="🎮 Match Order Locked In!",
+                    description="The remaining pool maps have been randomized for the sequence.",
                     color=discord.Color.gold()
                 )
-                active_vetos.pop(self.channel_id, None)
-                await interaction.response.edit_message(embed=embed, view=None)
+                final_embed.add_field(name="🗺️ MAP 1 (Rolled First)", value=f"**{map_1}**", inline=False)
+                final_embed.add_field(name="🗺️ MAP 2", value=f"**{map_2}**", inline=True)
+                final_embed.add_field(name="🗺️ MAP 3 (If Needed)", value=f"**{map_3}**", inline=True)
+                final_embed.set_footer(text="⚔️ BEST OF 3 SERIES")
+
+                await interaction.followup.send(embed=final_embed)
                 return
 
+            # Continue to next turn if more than 3 maps remain
             self.current_turn = self.t2_id if self.current_turn == self.t1_id else self.t1_id
             active_vetos[self.channel_id]["turn"] = self.current_turn
             current_team_name = self.t1_name if self.current_turn == self.t1_id else self.t2_name
@@ -189,10 +215,5 @@ class MapBanView(discord.ui.View):
                 color=discord.Color.orange()
             )
             embed.add_field(name="Banned Maps", value=", ".join(self.banned_maps) if self.banned_maps else "None", inline=False)
-            
-            await interaction.response.edit_message(embed=embed, view=self)
-
-        return callback
-
-# 8. Start the Runtime Environment Engine
+await interaction.response.edit_message(embed=embed, view=self)return callback
 bot.run(os.environ.get("DISCORD_TOKEN"))
