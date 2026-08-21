@@ -1,2 +1,0 @@
-discord.js
-# add any other packages your bot needs
