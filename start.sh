@@ -1,2 +1,2 @@
 #!/bin/bash
-json main.js
+json package.json
