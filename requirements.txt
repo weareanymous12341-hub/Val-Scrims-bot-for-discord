@@ -1,2 +1,2 @@
-discord.py
+discord.js
 # add any other packages your bot needs
